@@ -463,6 +463,7 @@ class _DashboardAdminPageState extends State<DashboardAdminPage> {
     required String docId,
     required Map<String, dynamic> data,
   }) {
+    // Logika ini mengambil URL dari data, atau menggunakan placeholder jika tidak ada
     final imageUrl =
         data['imageUrl'] ??
         'https://placehold.co/100x100/CCCCCC/FFFFFF?text=No+Image';
@@ -490,13 +491,18 @@ class _DashboardAdminPageState extends State<DashboardAdminPage> {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(12.0),
+            // Widget Image.network akan menampilkan gambar dari URL
             child: Image.network(
               imageUrl,
               width: 80,
               height: 80,
               fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) =>
-                  const Icon(Icons.image_not_supported, size: 80),
+              // Tampilkan icon error jika URL gambar tidak valid atau gagal dimuat
+              errorBuilder: (context, error, stackTrace) => const Icon(
+                Icons.image_not_supported,
+                size: 80,
+                color: Colors.grey,
+              ),
             ),
           ),
           const SizedBox(width: 16),

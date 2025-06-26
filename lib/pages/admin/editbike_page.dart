@@ -1,6 +1,7 @@
 // Lokasi: pages/admin/editbike_page.dart
 import 'dart:io';
 import 'package:book_app/service/database.dart';
+import 'package:book_app/service/image_upload_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -308,20 +309,27 @@ class _EditbikePageState extends State<EditbikePage> {
     });
 
     try {
-      // String imageUrl = _networkImageUrl ?? "";
-      // Jika user memilih gambar baru, upload gambar tersebut dan dapatkan URL barunya.
-      // if (_selectedImage != null) {
-      //   // Logika upload gambar ke Firebase Storage di sini...
-      //   // imageUrl = await uploadImageAndGetUrl(_selectedImage!);
-      // }
+      String imageUrl = _networkImageUrl ?? "";
+
+      // Jika ada gambar baru yang dipilih, upload dan perbarui URL
+      if (_selectedImage != null) {
+        final newImageUrl = await ImageUploadService.uploadImage(
+          _selectedImage!,
+        );
+        if (newImageUrl != null) {
+          imageUrl = newImageUrl;
+        } else {
+          throw Exception("Gagal mengunggah gambar baru.");
+        }
+      }
 
       Map<String, dynamic> updatedData = {
         'name': _namaController.text,
         'description': _deskripsiController.text,
         'quantity': int.tryParse(_jumlahController.text) ?? 0,
         'agreedToTerms': _setujuSyarat,
-        // 'imageUrl': imageUrl, // gunakan URL baru jika ada
-        'updatedAt': FieldValue.serverTimestamp(), // Tandai waktu update
+        'imageUrl': imageUrl,
+        'updatedAt': FieldValue.serverTimestamp(),
       };
 
       // Panggil method update dari DatabaseMethod

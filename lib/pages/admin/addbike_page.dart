@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:book_app/service/database.dart';
+import 'package:book_app/service/image_upload_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -34,17 +35,31 @@ class _AddbikePageState extends State<AddbikePage> {
     super.dispose();
   }
 
-  addBikeData() async {
-    // A. Validasi semua input terlebih dahulu
-    if (!_formKey.currentState!.validate()) return;
-    if (_selectedImage == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Mohon pilih gambar terlebih dahulu.')),
-      );
+  // --- FUNGSI BARU UNTUK MEMBERSIHKAN FORM ---
+  void _clearForm() {
+    setState(() {
+      _selectedImage = null;
+      _namaController.clear();
+      _deskripsiController.clear();
+      _jumlahController.clear();
+      _setujuSyarat = false;
+      // Reset state dari form untuk menghilangkan pesan validasi sebelumnya
+      _formKey.currentState?.reset();
+    });
+  }
+
+  // --- FUNGSI addBikeData() DENGAN PERUBAHAN KE CLOUDINARY ---
+  Future<void> addBikeData() async {
+    if (!_formKey.currentState!.validate() || _selectedImage == null) {
+      // Tampilkan error jika form tidak valid atau gambar kosong
+      if (_selectedImage == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Mohon pilih gambar terlebih dahulu.')),
+        );
+      }
       return;
     }
 
-    // B. Verifikasi pengguna (lapisan kedua), dan ambil ID-nya
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -59,41 +74,45 @@ class _AddbikePageState extends State<AddbikePage> {
     });
 
     try {
-      // (Nantinya di sini ada proses upload gambar ke Firebase Storage)
-      // Untuk sekarang kita siapkan datanya tanpa URL gambar.
-      String imageUrl = ""; // Akan diisi URL setelah upload
+      // --- PERUBAHAN UTAMA DI SINI ---
+      // Memanggil service upload Cloudinary
+      final String? imageUrl = await ImageUploadService.uploadImage(
+        _selectedImage!,
+      );
 
-      // C. Siapkan data dalam bentuk Map
+      if (imageUrl == null) {
+        throw Exception("Gagal mendapatkan URL gambar dari Cloudinary.");
+      }
+      // -----------------------------
+
       Map<String, dynamic> bikeData = {
         "name": _namaController.text,
         "description": _deskripsiController.text,
-        // Konversi ke angka
         "quantity": int.tryParse(_jumlahController.text) ?? 0,
-        "imageUrl": imageUrl,
+        "imageUrl": imageUrl, // <-- URL dari Cloudinary
         "agreedToTerms": _setujuSyarat,
-        "createdBy": userId, // PENANDA PENTING: Siapa pemilik data ini
-        "createdAt": FieldValue.serverTimestamp(), // Timestamp dari server
+        "createdBy": userId,
+        "createdAt": FieldValue.serverTimestamp(),
       };
 
-      // D. Panggil method dari service database untuk menyimpan data
-      // Anggap kita membuat method baru `addBike` di DatabaseMethod
       await DatabaseMethod().addBike(bikeData);
 
-      // E. Beri feedback sukses dan kembali ke halaman sebelumnya
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Data baru berhasil ditambahkan!')),
+          const SnackBar(
+            content: Text('Data baru berhasil ditambahkan!'),
+            backgroundColor: Colors.green,
+          ),
         );
+        _clearForm();
       }
     } catch (e) {
-      // F. Tangani jika ada error saat proses penyimpanan
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Gagal menyimpan data: $e')));
       }
     } finally {
-      // G. Pastikan loading berhenti, baik sukses maupun gagal
       if (mounted) {
         setState(() {
           isLoading = false;
@@ -109,7 +128,7 @@ class _AddbikePageState extends State<AddbikePage> {
         centerTitle: true,
         automaticallyImplyLeading: false,
         title: const Text('Formulir Data Baru'),
-        backgroundColor: Colors.blueAccent,
+        backgroundColor: Colors.deepOrange,
         foregroundColor: Colors.white,
       ),
       body: SingleChildScrollView(
@@ -270,7 +289,9 @@ class _AddbikePageState extends State<AddbikePage> {
   Widget _buildSubmitButton() {
     return ElevatedButton.icon(
       icon: const Icon(Icons.send),
-      label: const Text('SIMPAN DATA'),
+      label: isLoading
+          ? const CircularProgressIndicator(color: Colors.white)
+          : const Text('SIMPAN DATA'),
       style: ElevatedButton.styleFrom(
         padding: const EdgeInsets.symmetric(vertical: 16),
         backgroundColor: Colors.blueAccent,
@@ -278,9 +299,7 @@ class _AddbikePageState extends State<AddbikePage> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
       ),
-      onPressed: () {
-        addBikeData();
-      },
+      onPressed: isLoading ? null : addBikeData,
     );
   }
 

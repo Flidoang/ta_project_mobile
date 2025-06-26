@@ -19,8 +19,8 @@ class _NavigationAdminState extends State<NavigationAdmin> {
   static const List<Widget> _pages = <Widget>[
     DashboardAdminPage(),
     AddbikePage(),
-    MonitoringPage(), // Halaman monitoring
-    SettingAdminPage(), // Halaman setting
+    MonitoringPage(),
+    SettingAdminPage(),
   ];
 
   void _onItemTapped(int index) {
