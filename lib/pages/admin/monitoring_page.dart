@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:intl/intl.dart';
+import 'package:latlong2/latlong.dart';
 
 class MonitoringPage extends StatefulWidget {
   const MonitoringPage({super.key});
@@ -13,30 +16,44 @@ class MonitoringPage extends StatefulWidget {
 class _MonitoringPageState extends State<MonitoringPage>
     with SingleTickerProviderStateMixin {
   final DatabaseReference _sensorParentRef = FirebaseDatabase.instance.ref(
-    'data_iot_esp32',
+    'data_iot_terintegrasi',
   );
 
-  // AnimationController untuk efek getaran
   late AnimationController _animationController;
+  final MapController _mapController = MapController();
+
+  late final ValueNotifier<LatLng> _positionNotifier;
 
   @override
   void initState() {
     super.initState();
-    // PERBAIKAN: Hapus listener yang memanggil setState()
-    // Kita akan gunakan AnimatedBuilder yang lebih efisien.
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 100),
     );
-    // ..addListener(() {
-    //   setState(() {});
-    // }); // <-- INI PENYEBAB LOOP, KITA HAPUS
+    _positionNotifier = ValueNotifier(const LatLng(-6.954183, 107.610557));
   }
 
   @override
   void dispose() {
     _animationController.dispose();
+    _mapController.dispose();
+    _positionNotifier.dispose();
     super.dispose();
+  }
+
+  void _updateMapPosition(LatLng newPosition) {
+    if (!mounted) return;
+
+    if (_positionNotifier.value.latitude != newPosition.latitude ||
+        _positionNotifier.value.longitude != newPosition.longitude) {
+      _positionNotifier.value = newPosition;
+    }
+
+    _mapController.move(
+      newPosition,
+      18.0,
+    ); // Gunakan zoom level yang lebih tinggi
   }
 
   @override
@@ -45,8 +62,9 @@ class _MonitoringPageState extends State<MonitoringPage>
       appBar: AppBar(
         centerTitle: true,
         automaticallyImplyLeading: false,
-        title: const Text('Realtime IoT Monitor'),
+        title: const Text('Realtime IoT Monitor (OSM)'),
         backgroundColor: const Color(0xFF1E2A38),
+        foregroundColor: Colors.white,
       ),
       backgroundColor: const Color(0xFF1E2A38),
       body: StreamBuilder(
@@ -73,13 +91,15 @@ class _MonitoringPageState extends State<MonitoringPage>
           final data = Map<String, dynamic>.from(
             latestEntry.values.first as Map,
           );
+
+          // Parsing data yang lebih lengkap
           final accelerometer = Map<String, dynamic>.from(
             data['accelerometer'] as Map,
           );
-
-          final bool isThresholdExceeded = data['threshold_exceeded'] ?? false;
-          final String thresholdValue =
-              data['threshold_value_mps2']?.toString() ?? 'N/A';
+          final gpsData = Map<String, dynamic>.from(data['gps'] as Map);
+          final movingAverageData = Map<String, dynamic>.from(
+            data['moving_average'] as Map,
+          );
 
           final double x =
               double.tryParse(accelerometer['x'].toString()) ?? 0.0;
@@ -87,14 +107,36 @@ class _MonitoringPageState extends State<MonitoringPage>
               double.tryParse(accelerometer['y'].toString()) ?? 0.0;
           final double z =
               double.tryParse(accelerometer['z'].toString()) ?? 0.0;
+
+          final double latitude =
+              double.tryParse(gpsData['latitude'].toString()) ??
+              _positionNotifier.value.latitude;
+          final double longitude =
+              double.tryParse(gpsData['longitude'].toString()) ??
+              _positionNotifier.value.longitude;
+          final int satellites =
+              int.tryParse(gpsData['satellites'].toString()) ?? 0;
+
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _updateMapPosition(LatLng(latitude, longitude));
+          });
+
+          // --- PERBAIKAN #1: Gunakan field 'is_anomaly' dan 'dynamic_threshold' ---
+          final bool isAnomaly = data['is_anomaly'] ?? false;
+          final String dynamicThreshold =
+              movingAverageData['dynamic_threshold']?.toString() ?? 'N/A';
+          final String averageMagnitude =
+              movingAverageData['average_magnitude']?.toString() ?? 'N/A';
+          final String currentMagnitude =
+              movingAverageData['current_magnitude']?.toString() ?? 'N/A';
+
           final String deviceId = data['device_id'] ?? 'N/A';
           final int timestamp = data['timestamp'] ?? 0;
           final String lastUpdate = DateFormat(
             'dd MMM yy, HH:mm:ss',
           ).format(DateTime.fromMillisecondsSinceEpoch(timestamp));
 
-          // PERBAIKAN: Logika untuk memulai dan menghentikan animasi
-          if (isThresholdExceeded) {
+          if (isAnomaly) {
             if (!_animationController.isAnimating) {
               _animationController.repeat(reverse: true);
             }
@@ -113,7 +155,13 @@ class _MonitoringPageState extends State<MonitoringPage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                _buildStatusCard(isThresholdExceeded, thresholdValue),
+                _buildStatusCard(isAnomaly, dynamicThreshold),
+                const SizedBox(height: 30),
+                _buildMapView(satellites),
+                const SizedBox(height: 30),
+
+                // --- PERBAIKAN #3: Tampilkan data magnitudo ---
+                _buildMagnitudeSection(currentMagnitude, averageMagnitude),
                 const SizedBox(height: 30),
 
                 const Text(
@@ -124,12 +172,10 @@ class _MonitoringPageState extends State<MonitoringPage>
                 SizedBox(
                   height: 200,
                   width: 200,
-                  // PERBAIKAN: Gunakan AnimatedBuilder untuk animasi yang efisien
                   child: AnimatedBuilder(
                     animation: _animationController,
                     builder: (context, child) {
-                      // Efek getaran hanya terjadi saat animasi berjalan
-                      final shakeOffset = isThresholdExceeded
+                      final shakeOffset = isAnomaly
                           ? math.sin(
                                   _animationController.value * math.pi * 10,
                                 ) *
@@ -137,8 +183,7 @@ class _MonitoringPageState extends State<MonitoringPage>
                           : 0.0;
                       return Transform.translate(
                         offset: Offset(shakeOffset, 0),
-                        child:
-                            child, // 'child' adalah widget Transform di bawah
+                        child: child,
                       );
                     },
                     child: Transform(
@@ -151,7 +196,7 @@ class _MonitoringPageState extends State<MonitoringPage>
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
-                            color: isThresholdExceeded
+                            color: isAnomaly
                                 ? Colors.redAccent
                                 : Colors.transparent,
                             width: 4,
@@ -163,7 +208,7 @@ class _MonitoringPageState extends State<MonitoringPage>
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: isThresholdExceeded
+                              color: isAnomaly
                                   ? Colors.red.withOpacity(0.7)
                                   : Colors.black.withOpacity(0.5),
                               blurRadius: 20,
@@ -173,7 +218,7 @@ class _MonitoringPageState extends State<MonitoringPage>
                         ),
                         child: const Center(
                           child: Icon(
-                            Icons.screen_rotation_alt,
+                            Icons.explore,
                             color: Colors.white,
                             size: 60,
                           ),
@@ -183,7 +228,6 @@ class _MonitoringPageState extends State<MonitoringPage>
                   ),
                 ),
                 const SizedBox(height: 40),
-
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
@@ -204,23 +248,7 @@ class _MonitoringPageState extends State<MonitoringPage>
                     ),
                   ],
                 ),
-                const SizedBox(height: 24),
-
-                const Text(
-                  'Indikator Gravitasi (Z)',
-                  style: TextStyle(color: Colors.white),
-                ),
-                const SizedBox(height: 8),
-                LinearProgressIndicator(
-                  value: (z / 12).clamp(0.0, 1.0),
-                  minHeight: 10,
-                  backgroundColor: Colors.grey.shade700,
-                  valueColor: const AlwaysStoppedAnimation<Color>(
-                    Colors.lightGreenAccent,
-                  ),
-                ),
                 const SizedBox(height: 40),
-
                 _buildDeviceInfoCard(deviceId, lastUpdate),
               ],
             ),
@@ -230,17 +258,82 @@ class _MonitoringPageState extends State<MonitoringPage>
     );
   }
 
-  Widget _buildStatusCard(bool isExceeded, String thresholdValue) {
-    //... (Tidak ada perubahan di widget ini)
-    final statusColor = isExceeded
-        ? Colors.red.shade400
-        : Colors.green.shade400;
-    final statusText = isExceeded ? 'BAHAYA' : 'AMAN';
-    final statusIcon = isExceeded
+  Widget _buildMapView(int satellites) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Lokasi Real-time',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          height: 250,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(15),
+            border: Border.all(color: Colors.orangeAccent),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(15),
+            child: FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialCenter: _positionNotifier.value,
+                initialZoom: 16.0,
+                // --- PERBAIKAN #2: Tambahkan maxZoom ---
+                maxZoom: 18.0,
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.example.book_app',
+                ),
+                ValueListenableBuilder<LatLng>(
+                  valueListenable: _positionNotifier,
+                  builder: (context, position, child) {
+                    return MarkerLayer(
+                      markers: [
+                        Marker(
+                          point: position,
+                          width: 80,
+                          height: 80,
+                          child: const Icon(
+                            Icons.location_pin,
+                            color: Colors.red,
+                            size: 40,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Center(
+          child: Text(
+            'Satelit Terhubung: $satellites',
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatusCard(bool isAnomaly, String thresholdValue) {
+    final statusColor = isAnomaly ? Colors.red.shade400 : Colors.green.shade400;
+    final statusText = isAnomaly ? 'BAHAYA' : 'AMAN';
+    final statusIcon = isAnomaly
         ? Icons.warning_amber_rounded
         : Icons.check_circle_outline_rounded;
-    final message = isExceeded
-        ? 'Getaran Melebihi Batas Normal!'
+    final message = isAnomaly
+        ? 'Terdeteksi Anomali Getaran!'
         : 'Sistem Beroperasi Secara Normal';
 
     return Container(
@@ -277,7 +370,7 @@ class _MonitoringPageState extends State<MonitoringPage>
           Text(message, style: const TextStyle(color: Colors.white70)),
           const Divider(color: Colors.white24, height: 24),
           Text(
-            'Ambang Batas Getaran: $thresholdValue m/s²',
+            'Ambang Batas Dinamis: $thresholdValue m/s²',
             style: const TextStyle(color: Colors.white),
           ),
         ],
@@ -285,20 +378,37 @@ class _MonitoringPageState extends State<MonitoringPage>
     );
   }
 
+  // --- WIDGET BARU UNTUK MENAMPILKAN MAGNITUDO ---
+  Widget _buildMagnitudeSection(String current, String average) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(15),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _buildDataCard('Getaran Saat Ini', current, Colors.amberAccent),
+          _buildDataCard('Rata-rata Getaran', average, Colors.lightBlueAccent),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDataCard(String title, String value, Color color) {
-    //... (Tidak ada perubahan di widget ini)
     return Column(
       children: [
         Text(
           title,
-          style: const TextStyle(color: Colors.white70, fontSize: 16),
+          style: const TextStyle(color: Colors.white70, fontSize: 14),
         ),
         const SizedBox(height: 8),
         Text(
           value,
           style: TextStyle(
             color: color,
-            fontSize: 28,
+            fontSize: 26,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -307,7 +417,6 @@ class _MonitoringPageState extends State<MonitoringPage>
   }
 
   Widget _buildDeviceInfoCard(String deviceId, String lastUpdate) {
-    //... (Tidak ada perubahan di widget ini)
     return Card(
       color: Colors.white.withOpacity(0.1),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
