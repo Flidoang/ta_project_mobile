@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:math' as math;
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +14,7 @@ class MonitoringPage extends StatefulWidget {
 
 class _MonitoringPageState extends State<MonitoringPage>
     with SingleTickerProviderStateMixin {
+  // Mengarahkan ke path database yang benar sesuai gambar Anda
   final DatabaseReference _sensorParentRef = FirebaseDatabase.instance.ref(
     'data_iot_terintegrasi',
   );
@@ -50,10 +50,8 @@ class _MonitoringPageState extends State<MonitoringPage>
       _positionNotifier.value = newPosition;
     }
 
-    _mapController.move(
-      newPosition,
-      18.0,
-    ); // Gunakan zoom level yang lebih tinggi
+    // Menggerakkan kamera peta
+    _mapController.move(newPosition, 18.0);
   }
 
   @override
@@ -62,7 +60,7 @@ class _MonitoringPageState extends State<MonitoringPage>
       appBar: AppBar(
         centerTitle: true,
         automaticallyImplyLeading: false,
-        title: const Text('Realtime IoT Monitor (OSM)'),
+        title: const Text('Realtime IoT Monitor'),
         backgroundColor: const Color(0xFF1E2A38),
         foregroundColor: Colors.white,
       ),
@@ -121,8 +119,8 @@ class _MonitoringPageState extends State<MonitoringPage>
             _updateMapPosition(LatLng(latitude, longitude));
           });
 
-          // --- PERBAIKAN #1: Gunakan field 'is_anomaly' dan 'dynamic_threshold' ---
-          final bool isAnomaly = data['is_anomaly'] ?? false;
+          // --- PERBAIKAN UTAMA: Ambil 'is_anomaly' dari 'movingAverageData' ---
+          final bool isAnomaly = movingAverageData['is_anomaly'] ?? false;
           final String dynamicThreshold =
               movingAverageData['dynamic_threshold']?.toString() ?? 'N/A';
           final String averageMagnitude =
@@ -160,7 +158,6 @@ class _MonitoringPageState extends State<MonitoringPage>
                 _buildMapView(satellites),
                 const SizedBox(height: 30),
 
-                // --- PERBAIKAN #3: Tampilkan data magnitudo ---
                 _buildMagnitudeSection(currentMagnitude, averageMagnitude),
                 const SizedBox(height: 30),
 
@@ -284,8 +281,7 @@ class _MonitoringPageState extends State<MonitoringPage>
               options: MapOptions(
                 initialCenter: _positionNotifier.value,
                 initialZoom: 16.0,
-                // --- PERBAIKAN #2: Tambahkan maxZoom ---
-                maxZoom: 18.0,
+                maxZoom: 19.0,
               ),
               children: [
                 TileLayer(
@@ -378,7 +374,6 @@ class _MonitoringPageState extends State<MonitoringPage>
     );
   }
 
-  // --- WIDGET BARU UNTUK MENAMPILKAN MAGNITUDO ---
   Widget _buildMagnitudeSection(String current, String average) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),

@@ -409,7 +409,7 @@ class _DetailPageState extends State<DetailPage> {
               padding: const EdgeInsets.all(16.0),
               child: ElevatedButton.icon(
                 icon: const Icon(Icons.shopping_cart_checkout),
-                label: const Text('Pesan Sekarang'),
+                label: const Text('Booking Sekarang'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.deepOrange,
                   foregroundColor: Colors.white,
