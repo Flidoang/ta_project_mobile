@@ -1,3 +1,4 @@
+// Lokasi: lib/pages/user/dashboard_page_revamp.dart
 import 'package:book_app/pages/user/detail_page.dart';
 import 'package:book_app/service/database.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -12,19 +13,35 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  String userName = 'Pengguna'; // Nilai default
+  String userName = 'Pengguna';
+  String selectedCategory = 'Semua'; // State untuk kategori yang dipilih
+
+  // --- State untuk Carousel ---
+  late PageController _promoPageController;
+  int _currentPromoPage = 0;
+  final List<String> _promoImages = [
+    'https://pixel2print.co.uk/images/products/large/139.jpg',
+    'https://res.cloudinary.com/dk2yqgmqr/image/upload/v1749902334/cld-sample-4.jpg',
+    'https://res.cloudinary.com/dk2yqgmqr/image/upload/v1749902333/samples/coffee.jpg',
+  ];
+  // -------------------------
 
   @override
   void initState() {
     super.initState();
     _fetchUserData();
+    _promoPageController = PageController(viewportFraction: 0.9);
   }
 
-  // Fungsi untuk mengambil nama pengguna saat halaman dibuka
+  @override
+  void dispose() {
+    _promoPageController.dispose();
+    super.dispose();
+  }
+
   Future<void> _fetchUserData() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      // Menggunakan method yang sudah ada di DatabaseMethod
       final userInfo = await DatabaseMethod().getUserInfo(user.uid);
       if (userInfo != null && mounted) {
         setState(() {
@@ -34,43 +51,88 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  // Helper untuk sapaan dinamis berdasarkan waktu
   String getGreeting() {
     final hour = DateTime.now().hour;
-    if (hour < 12) {
-      return 'Selamat Pagi,';
-    } else if (hour < 15) {
-      return 'Selamat Siang,';
-    } else if (hour < 18) {
-      return 'Selamat Sore,';
-    }
-    return 'Selamat Malam,';
+    if (hour < 12) return 'Selamat Pagi';
+    if (hour < 15) return 'Selamat Siang';
+    if (hour < 18) return 'Selamat Sore';
+    return 'Selamat Malam';
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF4F7FE),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(vertical: 20.0),
+      body: CustomScrollView(
+        slivers: [
+          _buildHeaderSliver(context),
+          SliverToBoxAdapter(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildPromoCarouselSection(),
+                const SizedBox(height: 30),
+                _buildSectionHeaderWithFilter(),
+                // const SizedBox(height: 20),
+                _buildBikeList(),
+                const SizedBox(height: 20),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeaderSliver(BuildContext context) {
+    return SliverAppBar(
+      backgroundColor: const Color(0xFFF4F7FE),
+      expandedHeight: 220.0,
+      floating: false,
+      pinned: true,
+      elevation: 0,
+      automaticallyImplyLeading: false,
+      flexibleSpace: FlexibleSpaceBar(
+        background: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20.0),
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 1. Header Kustom
-              _buildHeader(),
-              const SizedBox(height: 30),
-
-              _buildFeaturedBikes(),
-              const SizedBox(height: 30),
-
-              // 2. Kartu Ringkasan (Summary Cards)
-              _buildSummaryCards(),
-              const SizedBox(height: 30),
-
-              // 3. Menu Aksi Cepat (Quick Actions)
-              _buildQuickActions(),
-              const SizedBox(height: 30),
+              const SizedBox(height: 40), // For status bar
+              Row(
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        getGreeting(),
+                        style: const TextStyle(
+                          color: Colors.grey,
+                          fontSize: 16,
+                        ),
+                      ),
+                      Text(
+                        userName,
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1E2A38),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Spacer(),
+                  const CircleAvatar(
+                    radius: 28,
+                    backgroundImage: NetworkImage(
+                      'https://i.pravatar.cc/150?u=budi',
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              _buildSearchBar(),
             ],
           ),
         ),
@@ -78,50 +140,42 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  // WIDGET BUILDER UNTUK SETIAP BAGIAN
-  Widget _buildHeader() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0),
-      child: Row(
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                getGreeting(), // Sapaan dinamis
-                style: const TextStyle(color: Colors.grey, fontSize: 16),
-              ),
-              Text(
-                userName,
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF1E2A38),
-                ),
-              ),
-            ],
-          ),
-          const Spacer(),
-          const CircleAvatar(
-            radius: 30,
-            backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=budi'),
-          ),
-        ],
+  Widget _buildSearchBar() {
+    return TextField(
+      decoration: InputDecoration(
+        hintText: 'Cari sepeda impianmu...',
+        hintStyle: TextStyle(color: Colors.grey.shade500),
+        prefixIcon: Icon(Icons.search, color: Colors.grey.shade500),
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(vertical: 15),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(30),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(30),
+          borderSide: BorderSide(color: Colors.grey.shade200),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(30),
+          borderSide: const BorderSide(color: Colors.deepOrange),
+        ),
       ),
     );
   }
 
-  // --- WIDGET BARU YANG KREATIF UNTUK MENAMPILKAN DATA "BIKES" ---
-  Widget _buildFeaturedBikes() {
+  // --- WIDGET BARU UNTUK SECTION PROMOSI ---
+  Widget _buildPromoCarouselSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 20.0),
           child: Text(
-            'Jelajahi Koleksi Kami',
+            'Promo Spesial',
             style: TextStyle(
-              fontSize: 18,
+              fontSize: 20,
               fontWeight: FontWeight.bold,
               color: Color(0xFF1E2A38),
             ),
@@ -129,265 +183,262 @@ class _DashboardPageState extends State<DashboardPage> {
         ),
         const SizedBox(height: 16),
         SizedBox(
-          height: 220, // Tentukan tinggi untuk area scroll horizontal
-          child: StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('Bikes').snapshots(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                return const Center(child: Text('Koleksi belum tersedia.'));
-              }
-
-              var bikeDocs = snapshot.data!.docs;
-              return ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.only(left: 20.0),
-                itemCount: bikeDocs.length,
-                itemBuilder: (context, index) {
-                  var data = bikeDocs[index].data() as Map<String, dynamic>;
-                  var docId = bikeDocs[index].id;
-                  // Bangun kartu dengan data yang didapat
-                  return _buildBikeCard(
-                    docId: docId,
-                    imageUrl:
-                        data['imageUrl'] ??
-                        'https://placehold.co/400x600/CCCCCC/FFFFFF?text=No+Image',
-                    name: data['name'] ?? 'Tanpa Nama',
-                  );
-                },
+          height: 150,
+          child: PageView.builder(
+            controller: _promoPageController,
+            itemCount: _promoImages.length,
+            onPageChanged: (int page) {
+              setState(() {
+                _currentPromoPage = page;
+              });
+            },
+            itemBuilder: (context, index) {
+              return Container(
+                margin: const EdgeInsets.symmetric(horizontal: 6),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  image: DecorationImage(
+                    image: NetworkImage(_promoImages[index]),
+                    fit: BoxFit.cover,
+                  ),
+                ),
               );
             },
           ),
         ),
+        const SizedBox(height: 12),
+        // --- INDIKATOR HALAMAN CAROUSEL ---
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(_promoImages.length, (index) {
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              margin: const EdgeInsets.symmetric(horizontal: 4.0),
+              height: 8,
+              width: _currentPromoPage == index ? 24 : 8,
+              decoration: BoxDecoration(
+                color: _currentPromoPage == index
+                    ? Colors.deepOrange
+                    : Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(12),
+              ),
+            );
+          }),
+        ),
       ],
     );
   }
-  // -------------------------------------------------------------------
 
-  Widget _buildSummaryCards() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.only(left: 20.0),
-      child: Row(
-        children: [
-          _buildSummaryCard(
-            '15',
-            'Tugas Selesai',
-            Icons.check_circle,
-            Colors.green,
-          ),
-          const SizedBox(width: 16),
-          _buildSummaryCard('2', 'Proyek Aktif', Icons.work, Colors.blue),
-          const SizedBox(width: 16),
-          _buildSummaryCard('8', 'Pesan Baru', Icons.message, Colors.orange),
-        ],
-      ),
-    );
-  }
+  Widget _buildSectionHeaderWithFilter() {
+    final List<String> categories = [
+      'Semua',
+      'Populer',
+      'Listrik',
+      'Gunung',
+      'Lipat',
+    ];
 
-  Widget _buildQuickActions() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Akses Cepat',
+            'Pilih Koleksi',
             style: TextStyle(
-              fontSize: 18,
+              fontSize: 20,
               fontWeight: FontWeight.bold,
               color: Color(0xFF1E2A38),
             ),
           ),
           const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildQuickActionItem(Icons.add_box, 'Tambah Data', Colors.blue),
-              _buildQuickActionItem(
-                Icons.qr_code_scanner,
-                'Scan QR',
-                Colors.green,
-              ),
-              _buildQuickActionItem(Icons.bar_chart, 'Laporan', Colors.orange),
-              _buildQuickActionItem(Icons.support_agent, 'Bantuan', Colors.red),
-            ],
+          SizedBox(
+            height: 40,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: categories.length,
+              itemBuilder: (context, index) {
+                bool isSelected = selectedCategory == categories[index];
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      selectedCategory = categories[index];
+                    });
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isSelected ? Colors.deepOrange : Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: isSelected
+                            ? Colors.deepOrange
+                            : Colors.grey.shade300,
+                      ),
+                    ),
+                    child: Text(
+                      categories[index],
+                      style: TextStyle(
+                        color: isSelected ? Colors.white : Colors.black87,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
           ),
         ],
       ),
     );
   }
 
-  // Helper baru untuk kartu koleksi yang estetik
-  Widget _buildBikeCard({
+  Widget _buildBikeList() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20.0),
+      child: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('Bikes').snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(child: Text('Koleksi belum tersedia.'));
+          }
+
+          var bikeDocs = snapshot.data!.docs;
+
+          if (selectedCategory != 'Semua' && selectedCategory != 'Populer') {
+            bikeDocs = bikeDocs.where((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              return data['category'] == selectedCategory;
+            }).toList();
+          }
+
+          if (bikeDocs.isEmpty) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 40.0),
+              child: Center(
+                child: Text('Tidak ada barang di kategori "$selectedCategory"'),
+              ),
+            );
+          }
+
+          return ListView.builder(
+            itemCount: bikeDocs.length,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemBuilder: (context, index) {
+              var data = bikeDocs[index].data() as Map<String, dynamic>;
+              var docId = bikeDocs[index].id;
+              return _buildBikeListItem(docId: docId, data: data);
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildBikeListItem({
     required String docId,
-    required String imageUrl,
-    required String name,
+    required Map<String, dynamic> data,
   }) {
+    final imageUrl =
+        data['imageUrl'] ??
+        'https://placehold.co/200x200/e0e0e0/ffffff?text=N/A';
+    final name = data['name'] ?? 'Tanpa Nama';
+    final category = data['category'] ?? 'Uncategorized';
+    final price = data['price'] ?? 0;
+
     return GestureDetector(
       onTap: () {
-        // AKTIFKAN NAVIGASI INI
         Navigator.push(
           context,
           MaterialPageRoute(builder: (context) => DetailPage(docId: docId)),
         );
       },
       child: Container(
-        width: 160,
-        margin: const EdgeInsets.only(right: 16.0),
+        margin: const EdgeInsets.only(bottom: 20),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
+          color: Colors.white,
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              spreadRadius: 2,
-              blurRadius: 10,
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 15,
               offset: const Offset(0, 5),
             ),
           ],
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: Stack(
-            children: [
-              // Gambar sebagai background
-              Positioned.fill(
-                child: Image.network(
-                  imageUrl,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) =>
-                      Container(color: Colors.grey.shade300),
-                ),
-              ),
-              // Gradient overlay untuk teks agar mudah dibaca
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: Container(
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Image.network(
+                imageUrl,
+                width: 100,
+                height: 100,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => Container(
+                  width: 100,
                   height: 100,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Colors.black.withOpacity(0.8),
-                        Colors.transparent,
-                      ],
-                      begin: Alignment.bottomCenter,
-                      end: Alignment.topCenter,
-                    ),
+                  color: Colors.grey.shade200,
+                  child: const Icon(
+                    Icons.image_not_supported,
+                    color: Colors.grey,
                   ),
                 ),
               ),
-              // Teks informasi
-              Positioned(
-                bottom: 16,
-                left: 16,
-                right: 16,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    const Row(
-                      children: [
-                        Text(
-                          'Lihat Detail',
-                          style: TextStyle(color: Colors.white70, fontSize: 12),
-                        ),
-                        Icon(
-                          Icons.arrow_forward_ios,
-                          color: Colors.white70,
-                          size: 12,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // WIDGET HELPER KECIL
-  Widget _buildSummaryCard(
-    String value,
-    String label,
-    IconData icon,
-    Color color,
-  ) {
-    return Container(
-      width: 150,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 32, color: color),
-          const SizedBox(height: 16),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: color,
             ),
-          ),
-          Text(label, style: TextStyle(color: color.withOpacity(0.8))),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildQuickActionItem(IconData icon, String label, Color color) {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.15),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, size: 30, color: color),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    category,
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    name,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 17,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Icon(Icons.star, color: Colors.amber, size: 18),
+                      const SizedBox(width: 4),
+                      const Text(
+                        '4.8',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '(120 Review)',
+                        style: TextStyle(
+                          color: Colors.grey.shade500,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.arrow_forward_ios, color: Colors.grey, size: 16),
+          ],
         ),
-        const SizedBox(height: 8),
-        Text(label, style: const TextStyle(fontSize: 12)),
-      ],
-    );
-  }
-
-  Widget buildActivityTile(
-    IconData icon,
-    String title,
-    String subtitle,
-    Color color,
-  ) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: CircleAvatar(
-        backgroundColor: color.withOpacity(0.1),
-        child: Icon(icon, color: color),
-      ),
-      title: Text(title, style: const TextStyle(fontSize: 14)),
-      subtitle: Text(
-        subtitle,
-        style: const TextStyle(fontSize: 12, color: Colors.grey),
       ),
     );
   }

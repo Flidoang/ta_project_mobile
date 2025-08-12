@@ -1,9 +1,12 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
-import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:mqtt_client/mqtt_client.dart';
+import 'package:mqtt_client/mqtt_server_client.dart';
 
 class MonitoringPage extends StatefulWidget {
   const MonitoringPage({super.key});
@@ -14,14 +17,14 @@ class MonitoringPage extends StatefulWidget {
 
 class _MonitoringPageState extends State<MonitoringPage>
     with SingleTickerProviderStateMixin {
-  // Mengarahkan ke path database yang benar sesuai gambar Anda
-  final DatabaseReference _sensorParentRef = FirebaseDatabase.instance.ref(
-    'data_iot_terintegrasi',
-  );
+  MqttServerClient? client;
+  bool _isConnected = false;
+  Map<String, dynamic>? _latestData;
+  final String _broker = 'broker.hivemq.com';
+  final String _topic = 'proyek/sepeda-01/full_status';
 
   late AnimationController _animationController;
   final MapController _mapController = MapController();
-
   late final ValueNotifier<LatLng> _positionNotifier;
 
   @override
@@ -31,7 +34,69 @@ class _MonitoringPageState extends State<MonitoringPage>
       vsync: this,
       duration: const Duration(milliseconds: 100),
     );
-    _positionNotifier = ValueNotifier(const LatLng(-6.954183, 107.610557));
+    _positionNotifier = ValueNotifier(const LatLng(-6.9175, 107.6191));
+    _connectToMqtt();
+  }
+
+  void _connectToMqtt() async {
+    final String clientId = 'flutter_client_${math.Random().nextInt(10000)}';
+    client = MqttServerClient(_broker, clientId);
+    client!.port = 1883;
+    client!.logging(on: false);
+    client!.keepAlivePeriod = 60;
+    client!.autoReconnect = true;
+
+    client!.onConnected = () {
+      if (!mounted) return;
+      setState(() {
+        _isConnected = true;
+      });
+      print('MQTT Client terhubung.');
+      client!.subscribe(_topic, MqttQos.atLeastOnce);
+    };
+
+    client!.onDisconnected = () {
+      if (!mounted) return;
+      setState(() {
+        _isConnected = false;
+      });
+      print('MQTT Client terputus.');
+    };
+
+    client!.onSubscribed = (String topic) {
+      print('Berhasil subscribe ke topic: $topic');
+    };
+
+    try {
+      print('Mencoba terhubung ke broker MQTT...');
+      await client!.connect();
+    } catch (e) {
+      print('Koneksi Gagal: $e');
+      client!.disconnect();
+    }
+
+    client!.updates!.listen((List<MqttReceivedMessage<MqttMessage?>>? c) {
+      if (c != null && c.isNotEmpty) {
+        final MqttPublishMessage recMess = c[0].payload as MqttPublishMessage;
+        final String payload = MqttPublishPayload.bytesToStringAsString(
+          recMess.payload.message,
+        );
+        _handleMessage(payload);
+      }
+    });
+  }
+
+  void _handleMessage(String payload) {
+    print('Pesan diterima: $payload');
+    if (!mounted) return;
+    try {
+      final Map<String, dynamic> decodedData = json.decode(payload);
+      setState(() {
+        _latestData = decodedData;
+      });
+    } catch (e) {
+      print('Gagal mem-parsing JSON: $e');
+    }
   }
 
   @override
@@ -39,18 +104,18 @@ class _MonitoringPageState extends State<MonitoringPage>
     _animationController.dispose();
     _mapController.dispose();
     _positionNotifier.dispose();
+    client?.disconnect();
     super.dispose();
   }
 
   void _updateMapPosition(LatLng newPosition) {
     if (!mounted) return;
+    if (newPosition.latitude == 0 && newPosition.longitude == 0) return;
 
     if (_positionNotifier.value.latitude != newPosition.latitude ||
         _positionNotifier.value.longitude != newPosition.longitude) {
       _positionNotifier.value = newPosition;
     }
-
-    // Menggerakkan kamera peta
     _mapController.move(newPosition, 18.0);
   }
 
@@ -65,192 +130,170 @@ class _MonitoringPageState extends State<MonitoringPage>
         foregroundColor: Colors.white,
       ),
       backgroundColor: const Color(0xFF1E2A38),
-      body: StreamBuilder(
-        stream: _sensorParentRef.orderByKey().limitToLast(1).onValue,
-        builder: (context, AsyncSnapshot<DatabaseEvent> snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError ||
-              !snapshot.hasData ||
-              snapshot.data!.snapshot.value == null) {
-            return const Center(
-              child: Text(
-                'Menunggu data dari sensor...\nPastikan perangkat IoT menyala.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white70),
+      body: !_isConnected || _latestData == null
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const CircularProgressIndicator(color: Colors.orangeAccent),
+                  const SizedBox(height: 20),
+                  Text(
+                    !_isConnected
+                        ? 'Menghubungkan ke broker: $_broker...'
+                        : 'Menunggu data dari topic:\n"$_topic"',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white70, height: 1.5),
+                  ),
+                ],
               ),
-            );
-          }
+            )
+          : _buildDashboard(_latestData!),
+    );
+  }
 
-          final Map<String, dynamic> latestEntry = Map<String, dynamic>.from(
-            snapshot.data!.snapshot.value as Map,
-          );
-          final data = Map<String, dynamic>.from(
-            latestEntry.values.first as Map,
-          );
+  Widget _buildDashboard(Map<String, dynamic> data) {
+    final accelerometer = Map<String, dynamic>.from(
+      data['accelerometer'] as Map,
+    );
+    final gpsData = Map<String, dynamic>.from(data['gps'] as Map);
+    final movingAverageData = Map<String, dynamic>.from(
+      data['moving_average'] as Map,
+    );
 
-          // Parsing data yang lebih lengkap
-          final accelerometer = Map<String, dynamic>.from(
-            data['accelerometer'] as Map,
-          );
-          final gpsData = Map<String, dynamic>.from(data['gps'] as Map);
-          final movingAverageData = Map<String, dynamic>.from(
-            data['moving_average'] as Map,
-          );
+    final double x = double.tryParse(accelerometer['x'].toString()) ?? 0.0;
+    final double y = double.tryParse(accelerometer['y'].toString()) ?? 0.0;
+    final double z = double.tryParse(accelerometer['z'].toString()) ?? 0.0;
 
-          final double x =
-              double.tryParse(accelerometer['x'].toString()) ?? 0.0;
-          final double y =
-              double.tryParse(accelerometer['y'].toString()) ?? 0.0;
-          final double z =
-              double.tryParse(accelerometer['z'].toString()) ?? 0.0;
+    final double latitude =
+        double.tryParse(gpsData['latitude'].toString()) ??
+        _positionNotifier.value.latitude;
+    final double longitude =
+        double.tryParse(gpsData['longitude'].toString()) ??
+        _positionNotifier.value.longitude;
+    final int satellites = int.tryParse(gpsData['satellites'].toString()) ?? 0;
 
-          final double latitude =
-              double.tryParse(gpsData['latitude'].toString()) ??
-              _positionNotifier.value.latitude;
-          final double longitude =
-              double.tryParse(gpsData['longitude'].toString()) ??
-              _positionNotifier.value.longitude;
-          final int satellites =
-              int.tryParse(gpsData['satellites'].toString()) ?? 0;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _updateMapPosition(LatLng(latitude, longitude));
+    });
 
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            _updateMapPosition(LatLng(latitude, longitude));
-          });
+    final bool isAnomaly = movingAverageData['is_anomaly'] ?? false;
+    final String dynamicThreshold =
+        movingAverageData['dynamic_threshold']?.toStringAsFixed(2) ?? 'N/A';
+    final String averageMagnitude =
+        movingAverageData['average_magnitude']?.toStringAsFixed(2) ?? 'N/A';
+    final String currentMagnitude =
+        movingAverageData['current_magnitude']?.toStringAsFixed(2) ?? 'N/A';
 
-          // --- PERBAIKAN UTAMA: Ambil 'is_anomaly' dari 'movingAverageData' ---
-          final bool isAnomaly = movingAverageData['is_anomaly'] ?? false;
-          final String dynamicThreshold =
-              movingAverageData['dynamic_threshold']?.toString() ?? 'N/A';
-          final String averageMagnitude =
-              movingAverageData['average_magnitude']?.toString() ?? 'N/A';
-          final String currentMagnitude =
-              movingAverageData['current_magnitude']?.toString() ?? 'N/A';
+    final String deviceId = data['device_id'] ?? 'N/A';
+    final int timestamp =
+        data['timestamp'] ?? DateTime.now().millisecondsSinceEpoch;
+    final String lastUpdate = DateFormat(
+      'dd MMM yy, HH:mm:ss',
+    ).format(DateTime.fromMillisecondsSinceEpoch(timestamp));
 
-          final String deviceId = data['device_id'] ?? 'N/A';
-          final int timestamp = data['timestamp'] ?? 0;
-          final String lastUpdate = DateFormat(
-            'dd MMM yy, HH:mm:ss',
-          ).format(DateTime.fromMillisecondsSinceEpoch(timestamp));
+    if (isAnomaly) {
+      if (!_animationController.isAnimating) {
+        _animationController.repeat(reverse: true);
+      }
+    } else {
+      if (_animationController.isAnimating) {
+        _animationController.stop();
+        _animationController.reset();
+      }
+    }
 
-          if (isAnomaly) {
-            if (!_animationController.isAnimating) {
-              _animationController.repeat(reverse: true);
-            }
-          } else {
-            if (_animationController.isAnimating) {
-              _animationController.stop();
-              _animationController.reset();
-            }
-          }
+    final double tiltY = (x / 10).clamp(-1.0, 1.0) * (math.pi / 4);
+    final double tiltX = -(y / 10).clamp(-1.0, 1.0) * (math.pi / 4);
 
-          final double tiltY = (x / 10).clamp(-1.0, 1.0) * (math.pi / 4);
-          final double tiltX = -(y / 10).clamp(-1.0, 1.0) * (math.pi / 4);
-
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                _buildStatusCard(isAnomaly, dynamicThreshold),
-                const SizedBox(height: 30),
-                _buildMapView(satellites),
-                const SizedBox(height: 30),
-
-                _buildMagnitudeSection(currentMagnitude, averageMagnitude),
-                const SizedBox(height: 30),
-
-                const Text(
-                  'Visualisasi Kemiringan',
-                  style: TextStyle(color: Colors.white, fontSize: 18),
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  height: 200,
-                  width: 200,
-                  child: AnimatedBuilder(
-                    animation: _animationController,
-                    builder: (context, child) {
-                      final shakeOffset = isAnomaly
-                          ? math.sin(
-                                  _animationController.value * math.pi * 10,
-                                ) *
-                                5
-                          : 0.0;
-                      return Transform.translate(
-                        offset: Offset(shakeOffset, 0),
-                        child: child,
-                      );
-                    },
-                    child: Transform(
-                      alignment: FractionalOffset.center,
-                      transform: Matrix4.identity()
-                        ..setEntry(3, 2, 0.001)
-                        ..rotateX(tiltX)
-                        ..rotateY(tiltY),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: isAnomaly
-                                ? Colors.redAccent
-                                : Colors.transparent,
-                            width: 4,
-                          ),
-                          gradient: const LinearGradient(
-                            colors: [Colors.deepOrange, Colors.orangeAccent],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: isAnomaly
-                                  ? Colors.red.withOpacity(0.7)
-                                  : Colors.black.withOpacity(0.5),
-                              blurRadius: 20,
-                              offset: const Offset(0, 10),
-                            ),
-                          ],
-                        ),
-                        child: const Center(
-                          child: Icon(
-                            Icons.explore,
-                            color: Colors.white,
-                            size: 60,
-                          ),
-                        ),
-                      ),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          _buildStatusCard(isAnomaly, dynamicThreshold),
+          const SizedBox(height: 30),
+          _buildMapView(satellites),
+          const SizedBox(height: 30),
+          _buildMagnitudeSection(currentMagnitude, averageMagnitude),
+          const SizedBox(height: 30),
+          const Text(
+            'Visualisasi Kemiringan',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 200,
+            width: 200,
+            child: AnimatedBuilder(
+              animation: _animationController,
+              builder: (context, child) {
+                final shakeOffset = isAnomaly
+                    ? math.sin(_animationController.value * math.pi * 10) * 5
+                    : 0.0;
+                return Transform.translate(
+                  offset: Offset(shakeOffset, 0),
+                  child: child,
+                );
+              },
+              child: Transform(
+                alignment: FractionalOffset.center,
+                transform: Matrix4.identity()
+                  ..setEntry(3, 2, 0.001)
+                  ..rotateX(tiltX)
+                  ..rotateY(tiltY),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isAnomaly ? Colors.redAccent : Colors.transparent,
+                      width: 4,
                     ),
+                    gradient: const LinearGradient(
+                      colors: [Colors.deepOrange, Colors.orangeAccent],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: isAnomaly
+                            ? Colors.red.withOpacity(0.7)
+                            : Colors.black.withOpacity(0.5),
+                        blurRadius: 20,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child: const Center(
+                    child: Icon(Icons.explore, color: Colors.white, size: 60),
                   ),
                 ),
-                const SizedBox(height: 40),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _buildDataCard(
-                      'Sumbu X',
-                      x.toStringAsFixed(2),
-                      Colors.cyan,
-                    ),
-                    _buildDataCard(
-                      'Sumbu Y',
-                      y.toStringAsFixed(2),
-                      Colors.pinkAccent,
-                    ),
-                    _buildDataCard(
-                      'Sumbu Z',
-                      z.toStringAsFixed(2),
-                      Colors.lightGreenAccent,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 40),
-                _buildDeviceInfoCard(deviceId, lastUpdate),
-              ],
+              ),
             ),
-          );
-        },
+          ),
+          const SizedBox(height: 40),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildDataCard('Sumbu X', x.toStringAsFixed(2), Colors.cyan),
+              _buildDataCard(
+                'Sumbu Y',
+                y.toStringAsFixed(2),
+                Colors.pinkAccent,
+              ),
+              _buildDataCard(
+                'Sumbu Z',
+                z.toStringAsFixed(2),
+                Colors.lightGreenAccent,
+              ),
+            ],
+          ),
+          const SizedBox(height: 40),
+          _buildDeviceInfoCard(deviceId, lastUpdate),
+        ],
       ),
     );
   }
@@ -284,9 +327,16 @@ class _MonitoringPageState extends State<MonitoringPage>
                 maxZoom: 19.0,
               ),
               children: [
+                // --- PERUBAHAN UTAMA DI SINI ---
                 TileLayer(
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.example.book_app',
+                  // Menggunakan NetworkTileProvider untuk menambahkan header
+                  tileProvider: NetworkTileProvider(
+                    headers: {
+                      'User-Agent':
+                          'com.example.app/1.0', // Ganti dengan nama paket aplikasi Anda
+                    },
+                  ),
                 ),
                 ValueListenableBuilder<LatLng>(
                   valueListenable: _positionNotifier,

@@ -249,7 +249,7 @@ class _SettingAdminPageState extends State<SettingAdminPage> {
   Widget _buildLogoutButton() {
     return ElevatedButton.icon(
       icon: const Icon(Icons.logout),
-      label: const Text('Logout dari Akun Admin'),
+      label: const Text('Logout'),
       style: ElevatedButton.styleFrom(
         backgroundColor: Colors.red.shade400,
         foregroundColor: Colors.white,
